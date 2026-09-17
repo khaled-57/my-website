@@ -89,6 +89,22 @@
       background: #fff5f4;
     }
 
+    .move-goal-button {
+      color: #527962;
+      border: 1px solid #cbd5cd;
+      background: #ffffff;
+    }
+
+    .move-goal-button:hover:not(:disabled) {
+      background: #edf3eb;
+    }
+
+    .move-goal-button:disabled {
+      color: #aeb9b0;
+      cursor: not-allowed;
+      opacity: .65;
+    }
+
     .goal-card.is-collapsed .progress-panel {
       display: none;
     }
@@ -195,7 +211,11 @@
         <label data-template-id="edit-goal-label" class="canva-text mb-2 block font-bold"></label> <textarea rows="3" class="edit-goal-input w-full rounded-2xl border border-[#cbd5cd] bg-white px-4 py-3 text-lg leading-7"></textarea>
        </div>
       </div>
-      <div class="flex items-start gap-3">
+      <div class="flex flex-wrap items-start justify-end gap-3">
+       <div class="flex gap-2" role="group" aria-label="ترتيب الهدف">
+        <button type="button" class="move-goal-button move-up-button rounded-full p-2" aria-label="نقل الهدف إلى الأعلى" title="نقل الهدف إلى الأعلى"><i data-lucide="arrow-up" width="18" height="18" aria-hidden="true"></i></button>
+        <button type="button" class="move-goal-button move-down-button rounded-full p-2" aria-label="نقل الهدف إلى الأسفل" title="نقل الهدف إلى الأسفل"><i data-lucide="arrow-down" width="18" height="18" aria-hidden="true"></i></button>
+       </div>
        <button type="button" class="expand-goal-button hidden-panel rounded-full border border-[#cbd5cd] bg-white px-4 py-2 font-bold" aria-expanded="true">فتح الأسئلة</button>
        <div class="progress-panel min-w-[145px] rounded-2xl border border-[#dae2d9] bg-white px-4 py-3">
        <p data-template-id="progress-label" class="canva-text text-sm font-bold"></p>
@@ -351,6 +371,14 @@
       return fields.filter(field => String(record[field] || "").trim().length > 0).length;
     }
 
+    function sortRecords(data) {
+      return [...data].sort((a, b) => {
+        const orderDifference = (Number(a.order_index) || 0) - (Number(b.order_index) || 0);
+        if (orderDifference !== 0) return orderDifference;
+        return new Date(a.created_at) - new Date(b.created_at);
+      });
+    }
+
     function updateSummary() {
       document.getElementById("total-count").textContent = records.length;
       document.getElementById("complete-count").textContent =
@@ -382,7 +410,7 @@
     }
 
     function renderRecords(data) {
-      records = [...data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      records = sortRecords(data);
       const currentCards = new Map(
         [...list.children].map(card => [card.dataset.recordId, card])
       );
@@ -391,6 +419,7 @@
         const oldCard = currentCards.get(record.__backendId);
         if (oldCard) {
           if (!oldCard.dataset.editing) populateCard(oldCard, record);
+          list.appendChild(oldCard);
           currentCards.delete(record.__backendId);
         } else {
           list.appendChild(createCard(record));
@@ -399,6 +428,7 @@
 
       currentCards.forEach(card => card.remove());
       updateSummary();
+      updateMoveButtons();
       lucide.createIcons();
     }
 
@@ -433,6 +463,8 @@
       const saveGoalButton = card.querySelector(".save-goal-button");
       const cancelEditButton = card.querySelector(".cancel-edit-button");
       const expandButton = card.querySelector(".expand-goal-button");
+      const moveUpButton = card.querySelector(".move-up-button");
+      const moveDownButton = card.querySelector(".move-down-button");
 
       /*
       form.addEventListener("submit", async event => {
@@ -517,6 +549,37 @@
       card.querySelector(".delete-goal-button").addEventListener("click", () => {
         openConfirmation({ type: "delete", recordId: card.dataset.recordId });
       });
+
+      moveUpButton.addEventListener("click", () => moveGoal(card.dataset.recordId, -1));
+      moveDownButton.addEventListener("click", () => moveGoal(card.dataset.recordId, 1));
+    }
+
+    function updateMoveButtons() {
+      [...list.children].forEach((card, index) => {
+        card.querySelector(".move-up-button").disabled = index === 0;
+        card.querySelector(".move-down-button").disabled = index === list.children.length - 1;
+      });
+    }
+
+    async function moveGoal(recordId, direction) {
+      const currentIndex = records.findIndex(record => record.__backendId === recordId);
+      const targetIndex = currentIndex + direction;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= records.length) return;
+
+      const currentRecord = records[currentIndex];
+      const targetRecord = records[targetIndex];
+      const currentOrder = Number(currentRecord.order_index) || currentIndex;
+      const targetOrder = Number(targetRecord.order_index) || targetIndex;
+      const updates = await Promise.all([
+        window.dataSdk.update({ ...currentRecord, order_index: targetOrder, updated_at: new Date().toISOString() }),
+        window.dataSdk.update({ ...targetRecord, order_index: currentOrder, updated_at: new Date().toISOString() })
+      ]);
+
+      if (updates.every(result => result.isOk)) {
+        showMessage("تم تغيير ترتيب الهدف.", "success");
+      } else {
+        showMessage("تعذر تغيير ترتيب الهدف. يرجى المحاولة مرة أخرى.", "error");
+      }
     }
 
     function openConfirmation(action) {
@@ -556,6 +619,7 @@
         realistic: "",
         ethical: "",
         direction: "",
+        order_index: records.length,
         created_at: now,
         updated_at: now
       });
